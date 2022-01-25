@@ -28,25 +28,52 @@ pipeline{
         }
         stage('Create Dockr Image'){
             steps{
-                sh 'docker build -t weblogin:latest .' 
-                sh 'docker tag weblogin kelvinduan/weblogin:latest'
-                sh 'docker rmi weblogin'
+                sh 'docker build -t weblogin:latest .'
             }
         }     
         stage('Publish to DockerHub'){
             steps{
-                withDockerRegistry([ credentialsId: "dockerhub-credential", url: "" ]) {
-                    sh 'docker push kelvinduan/weblogin:latest'
-                    sh 'docker rmi kelvinduan/weblogin:latest'
+                withDockerRegistry([ credentialsId: "dockerhub-credential", url: "" ]) {   
+                    sh '''
+		        docker tag weblogin kelvinduan/weblogin:latest
+                        docker push kelvinduan/weblogin:latest
+                        docker rmi kelvinduan/weblogin:latest
+                        docker rmi weblogin
+		    '''
                 }
             }
         }     
         stage('Run Docker Container'){
             steps{
-                sh 'docker stop weblogin'
-                sh 'docker rm weblogin'
-                sh 'docker image prune --force'
-                sh "docker run -d -p 8000:8080  --name weblogin kelvinduan/weblogin"
+                sh '''
+		    docker stop weblogin
+                    docker rm weblogin
+                    docker image prune --force
+                    docker run -d -p 8000:8080  --name weblogin kelvinduan/weblogin
+		'''
+            }
+        }
+	stage('Publish to Nexus'){
+            steps{
+                withCredentials([string(credentialsId: 'nexus-password', variable: 'nexus_password')]) {
+                    sh '''
+                        docker login -u admin -p ${nexus_password} 192.168.0.102:8083
+                        docker tag weblogin:latest 192.168.0.102:8083/weblogin:latest
+                        docker push 192.168.0.102:8083/weblogin:latest
+                        docker rmi 192.168.0.102:8083/weblogin:latest
+                        docker rmi weblogin:latest
+                    '''
+                }
+            }
+        }     
+        stage('Run Docker Container'){
+            steps{
+                sh '''
+                    docker stop weblogin
+                    docker rm weblogin
+                    docker image prune --force
+                    docker run -d -p 8000:8080  --name weblogin 192.168.0.102:8083/weblogin:latest
+                '''
             }
         }
     }
