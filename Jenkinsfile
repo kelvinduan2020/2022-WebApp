@@ -77,4 +77,11 @@ pipeline{
             }
         }
     }
+    post { 
+        always { 
+            sh '''
+                docker image prune --force
+            '''
+        }
+    }
 }
