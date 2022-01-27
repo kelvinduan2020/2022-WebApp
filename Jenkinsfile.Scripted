@@ -1,0 +1,57 @@
+node {
+    def mvnHome = tool 'maven'
+    def VERSION = env.BUILD_ID
+    def webAppName = "webapp"
+    def NEXUS_REPOSITORY_URL = "100.0.0.103:8082"
+
+    try {
+        stage('GitChecout') {
+            git branch: 'main', url: 'https://github.com/kelvinduan2020/2022-WebApp.git'
+        }
+        stage('SonarAnalysis') {
+            withSonarQubeEnv('sonarqube-server') {
+                sh "${mvnHome}/bin/mvn sonar:sonar"
+            }
+            // timeout(time: 1, unit: 'HOURS') {
+            //     def qg = waitForQualityGate()
+            //     if (qg.status != 'OK') {
+            //         error "Pipeline aborted due to quality gate failure: ${qg.status}"
+            //     }
+            // }
+        }
+        stage('MavenBuild') {
+            sh "${mvnHome}/bin/mvn clean package"
+        }
+        stage('Artifacts') {
+            archiveArtifacts 'webapp/target/*.war'
+        }
+        stage('DockerBuild') {
+            sh "docker build -t ${NEXUS_REPOSITORY_URL}/${webAppName}:${VERSION} ."
+        }
+        try{
+            stage('PushToNexus') {
+                withCredentials([string(credentialsId: 'nexus_password', variable: 'nexus_password')]) {
+                    sh "docker login -u admin -p ${nexus_password} ${NEXUS_REPOSITORY_URL}"
+                    sh "docker push ${NEXUS_REPOSITORY_URL}/${webAppName}:${VERSION}"
+                }
+            }
+        } catch (e) {        
+            sh 'docker image prune --force'
+            throw e
+        } finally {
+            sh "docker rmi \$(docker images ${NEXUS_REPOSITORY_URL}/${webAppName} -q)"
+        }
+        stage('DevDeploy') {
+             sshagent(['ssh-dev']) {
+                // sh "docker stop ${webAppName}"
+                // sh "docker rm ${webAppName}"
+                // sh "docker rmi \$(docker images ${NEXUS_REPOSITORY_URL}/${webAppName} -q)"
+                sh "ssh -o StrictHostKeyChecking=no -T vagrant@100.0.0.106 docker run -d -p 8080:8080 --name ${webAppName} ${NEXUS_REPOSITORY_URL}/${webAppName}:${VERSION}"
+             }
+        }
+    } catch (e) {
+        throw e
+    } finally {
+        mail bcc: '', body: "<br>Project: ${env.JOB_NAME} <br>Build Number: ${env.BUILD_NUMBER} <br> URL de build: ${env.BUILD_URL}", cc: '', charset: 'UTF-8', from: '', mimeType: 'text/html', replyTo: '', subject: "${currentBuild.currentResult} CI: Project name -> ${env.JOB_NAME}", to: "kelvinduan2018@gmail.com";
+    } 
+}
